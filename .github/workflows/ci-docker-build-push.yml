@@ -1,4 +1,4 @@
-name: CI - Build and Push
+name: CI - Build and Push Multi-Service
 
 on:
   push:
@@ -9,51 +9,64 @@ on:
 env:
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
   DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
-  IMAGE_NAME: Hypothesis-Generation
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        service:
+          - name: flask-app
+            dockerfile: Dockerfile
+            image: hypothesis-generation-flask
+          - name: prolog-service
+            dockerfile: Dockerfile.prolog
+            image: hypothesis-generation-prolog
+          - name: prefect-service
+            dockerfile: Dockerfile.prefect
+            image: hypothesis-generation-prefect
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
+     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
+     
     - name: Login to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
         password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
     - name: Create .env file
       run: |
-            echo "MONGODB_URI=${MONGODB_URI}" >> .env
-            echo "DB_NAME=${DB_NAME}" >> .env
-            echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> .env
-            echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> .env
-            echo "HF_TOKEN=${HF_TOKEN}" >> .env
-            echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}" >> .env
-            echo "JWT_SECRET=${JWT_SECRET}" >> .env
-    - name: build Docker
-      run: docker compose up --build
+        echo "MONGODB_URI=${{ secrets.MONGODB_URI }}" >> .env
+        echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+        echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+        echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+        echo "JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}" >> .env
+        echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
 
     - name: Extract Docker metadata
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.DOCKER_HUB_USERNAME }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.DOCKER_HUB_USERNAME }}/${{ matrix.service.image }}
         tags: |
           type=ref,event=branch
           type=sha
-          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
 
-    - name: Build and Push Docker image
+    - name: Build and Push ${{ matrix.service.name }}
       uses: docker/build-push-action@v5
       with:
         context: .
+        file: ${{ matrix.service.dockerfile }}
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha,scope=${{ matrix.service.name }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
