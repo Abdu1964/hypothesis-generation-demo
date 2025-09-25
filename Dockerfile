@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev libmagick++-dev libudunits2-dev libgdal-dev libproj-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Create symbolic links for python and pip (check if they exist first)
+RUN ln -sf /usr/bin/python3 /usr/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/bin/pip
+
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -125,6 +129,7 @@ RUN Rscript -e " \
 
 # Install uv
 RUN wget -qO- https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
 
 # Install Python dependencies
 COPY pyproject.toml .
