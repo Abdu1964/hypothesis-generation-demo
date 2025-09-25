@@ -60,6 +60,15 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
 
+    - name: Free Disk Space
+      run: |
+        echo "Freeing disk space..."
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        df -h
+
     - name: Build and Push ${{ matrix.service.name }}
       uses: docker/build-push-action@v5
       with:
