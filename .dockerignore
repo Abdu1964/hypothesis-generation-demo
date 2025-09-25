@@ -6,7 +6,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
+*.sqlite
 # Distribution / packaging
 .Python
 env/
