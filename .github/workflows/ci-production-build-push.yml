@@ -1,10 +1,10 @@
-name: CI - Build and Push Multi-Service (Staging Only)
+name: CI - Build and Push Multi-Service (Production)
 
 on:
   push:
-    branches: [ staging, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ staging, develop ]
+    branches: [ main ]
 
 env:
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -22,8 +22,8 @@ jobs:
       uses: docker/setup-buildx-action@v3
      
     - name: Login to Docker Hub
-      # Only login on push (not on PR)
-      if: github.event_name == 'push'
+      # Only login on push to main (not on PR)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -47,10 +47,9 @@ jobs:
         tags: |
           type=ref,event=branch
           type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          # Production tag for main branch pushes
+          type=raw,value=prod,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     - name: Free Disk Space (Before Prolog Build)
       run: |
@@ -68,12 +67,12 @@ jobs:
       with:
         context: .
         file: Dockerfile.prolog
-        # Only push on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
+        # Only push to Docker Hub on merge to main, not on PR
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         tags: ${{ steps.meta-prolog.outputs.tags }}
         labels: ${{ steps.meta-prolog.outputs.labels }}
-        cache-from: type=gha,scope=prolog-service
-        cache-to: type=gha,mode=max,scope=prolog-service
+        cache-from: type=gha,scope=prolog-service-prod
+        cache-to: type=gha,mode=max,scope=prolog-service-prod
 
   #  2: Prefect Service 
   build-prefect:
@@ -87,8 +86,8 @@ jobs:
       uses: docker/setup-buildx-action@v3
      
     - name: Login to Docker Hub
-      # Only login on push (not on PR)
-      if: github.event_name == 'push'
+      # Only login on push to main (not on PR)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -112,10 +111,9 @@ jobs:
         tags: |
           type=ref,event=branch
           type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          # Production tag for main branch pushes
+          type=raw,value=prod,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     - name: Free Disk Space (Before Prefect Build)
       run: |
@@ -133,12 +131,12 @@ jobs:
       with:
         context: .
         file: Dockerfile.prefect
-        # Only push to docker hub on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
+        # Only push to Docker Hub on merge to main, not on PR
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         tags: ${{ steps.meta-prefect.outputs.tags }}
         labels: ${{ steps.meta-prefect.outputs.labels }}
-        cache-from: type=gha,scope=prefect-service
-        cache-to: type=gha,mode=max,scope=prefect-service
+        cache-from: type=gha,scope=prefect-service-prod
+        cache-to: type=gha,mode=max,scope=prefect-service-prod
 
   # Priority 3: Prefect Deployment Service
   build-prefect-deployment:
@@ -152,8 +150,8 @@ jobs:
       uses: docker/setup-buildx-action@v3
      
     - name: Login to Docker Hub
-      # Only login on push (not on PR)
-      if: github.event_name == 'push'
+      # Only login on push to main (not on PR)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -177,10 +175,9 @@ jobs:
         tags: |
           type=ref,event=branch
           type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          # Production tag for main branch pushes
+          type=raw,value=prod,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     - name: Free Disk Space (Before Prefect Deployment Build)
       run: |
@@ -198,12 +195,12 @@ jobs:
       with:
         context: .
         file: Dockerfile.prefect
-        # Only push on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
+        # Only push to Docker Hub on merge to main, not on PR
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         tags: ${{ steps.meta-prefect-deployment.outputs.tags }}
         labels: ${{ steps.meta-prefect-deployment.outputs.labels }}
-        cache-from: type=gha,scope=prefect-deployment-service
-        cache-to: type=gha,mode=max,scope=prefect-deployment-service
+        cache-from: type=gha,scope=prefect-deployment-service-prod
+        cache-to: type=gha,mode=max,scope=prefect-deployment-service-prod
 
   #  4: Flask App 
   build-flask:
@@ -217,8 +214,8 @@ jobs:
       uses: docker/setup-buildx-action@v3
      
     - name: Login to Docker Hub
-      # Only login on push (not on PR)
-      if: github.event_name == 'push'
+      # Only login on push to main (not on PR)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -242,10 +239,9 @@ jobs:
         tags: |
           type=ref,event=branch
           type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          # Production tag for main branch pushes
+          type=raw,value=prod,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     - name: Free Disk Space (Before Flask Build)
       run: |
@@ -263,9 +259,9 @@ jobs:
       with:
         context: .
         file: Dockerfile
-        # Only push on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
+        # Only push to Docker Hub on merge to main, not on PR
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         tags: ${{ steps.meta-flask.outputs.tags }}
         labels: ${{ steps.meta-flask.outputs.labels }}
-        cache-from: type=gha,scope=flask-app
-        cache-to: type=gha,mode=max,scope=flask-app
+        cache-from: type=gha,scope=flask-app-prod
+        cache-to: type=gha,mode=max,scope=flask-app-prod
