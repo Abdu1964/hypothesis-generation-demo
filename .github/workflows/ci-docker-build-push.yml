@@ -1,10 +1,10 @@
-name: CI - Build and Push Multi-Service (Staging Only)
+name: CI - Build, Validate and Push Multi-Service (Staging Only)
 
 on:
   push:
-    branches: [ staging, develop ]
+    branches: [ staging ]
   pull_request:
-    branches: [ staging, develop ]
+    branches: [ staging ]
 
 env:
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -14,6 +14,9 @@ jobs:
   #  1: Prolog Service 
   build-prolog:
     runs-on: ubuntu-latest
+    outputs:
+      validation-status: ${{ steps.validate.outcome }}
+      image-tag: ${{ steps.meta-prolog.outputs.tags }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -46,40 +49,83 @@ jobs:
         images: ${{ env.DOCKER_HUB_USERNAME }}/hypothesis-generation-prolog
         tags: |
           type=ref,event=branch
-          type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
 
-    - name: Free Disk Space (Before Prolog Build)
+    - name: Free Disk Space
       run: |
-        echo "Freeing disk space before Prolog build..."
         sudo docker system prune -a -f
-        sudo docker builder prune -a -f
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
         df -h
 
-    - name: Build and Push Prolog Service
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile.prolog
-        # Only push on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
-        tags: ${{ steps.meta-prolog.outputs.tags }}
-        labels: ${{ steps.meta-prolog.outputs.labels }}
-        cache-from: type=gha,scope=prolog-service
-        cache-to: type=gha,mode=max,scope=prolog-service
+    - name: Build and Validate Prolog Service
+      id: validate
+  
+      run: |
+        echo "=== Building Prolog Service ==="
+        docker build -t ${{ steps.meta-prolog.outputs.tags }} -f Dockerfile.prolog .
+        
+        echo "=== Starting container for validation ==="
+        docker run -d --name prolog-test --env-file .env ${{ steps.meta-prolog.outputs.tags }}
+        
+        echo "=== Waiting for container initialization (30s) ==="
+        sleep 30
+        
+        echo "=== Checking container status ==="
+        if ! docker ps --filter "name=prolog-test" --format "{{.Names}}" | grep -q prolog-test; then
+          echo "VALIDATION FAILED: Container is not running!"
+          echo "=== Container Logs ==="
+          docker logs prolog-test
+          docker rm -f prolog-test 2>/dev/null || true
+          exit 1
+        fi
+        
+        echo "=== Capturing container logs ==="
+        docker logs prolog-test > /tmp/prolog-logs.txt 2>&1
+        
+        echo "=== Analyzing logs for errors ==="
+        if grep -iE "error|exception|failed|fatal|traceback|modulenotfounderror|importerror|cannot find|does not exist|no such file" /tmp/prolog-logs.txt; then
+          echo "VALIDATION FAILED: Errors detected in container logs!"
+          echo "=== Full Container Logs ==="
+          cat /tmp/prolog-logs.txt
+          docker stop prolog-test
+          docker rm prolog-test
+          exit 1
+        fi
+        
+        echo "VALIDATION PASSED: Container is healthy!"
+        echo "=== Container Logs (for reference) ==="
+        cat /tmp/prolog-logs.txt
+        
+        echo "=== Cleaning up test container ==="
+        docker stop prolog-test
+        docker rm prolog-test
 
-  #  2: Prefect Service 
+    - name: Push Prolog Service to Docker Hub
+      if: github.event_name == 'push' && steps.validate.outcome == 'success'
+      run: |
+        echo "=== Pushing validated image to Docker Hub ==="
+        docker push ${{ steps.meta-prolog.outputs.tags }}
+
+    - name: Final cleanup
+      if: always()
+      run: |
+        docker rm -f prolog-test 2>/dev/null || true
+        docker system prune -a -f
+
+  # 2: Prefect Service  
   build-prefect:
     runs-on: ubuntu-latest
+    
     needs: build-prolog  # Run after prolog build completes
+    outputs:
+      validation-status: ${{ steps.validate.outcome }}
+      image-tag: ${{ steps.meta-prefect.outputs.tags }}
     steps:
+    - name: Check Prolog status
+      run: |
+        echo "Prolog job status: ${{ needs.build-prolog.result }}"
+        echo "Prolog validation: ${{ needs.build-prolog.outputs.validation-status }}"
+     
     - name: Checkout repository
       uses: actions/checkout@v4
      
@@ -111,40 +157,74 @@ jobs:
         images: ${{ env.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect
         tags: |
           type=ref,event=branch
-          type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
 
-    - name: Free Disk Space (Before Prefect Build)
+    - name: Free Disk Space
       run: |
-        echo "Freeing disk space before Prefect build..."
         sudo docker system prune -a -f
-        sudo docker builder prune -a -f
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
         df -h
 
-    - name: Build and Push Prefect Service
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile.prefect
-        # Only push to docker hub on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
-        tags: ${{ steps.meta-prefect.outputs.tags }}
-        labels: ${{ steps.meta-prefect.outputs.labels }}
-        cache-from: type=gha,scope=prefect-service
-        cache-to: type=gha,mode=max,scope=prefect-service
+    - name: Build and Validate Prefect Service
+      id: validate
+      run: |
+        echo "=== Building Prefect Service ==="
+        docker build -t ${{ steps.meta-prefect.outputs.tags }} -f Dockerfile.prefect .
+        
+        echo "=== Starting container for validation ==="
+        docker run -d --name prefect-test --env-file .env ${{ steps.meta-prefect.outputs.tags }}
+        
+        echo "=== Waiting for container initialization (30s) ==="
+        sleep 30
+        
+        echo "=== Checking container status ==="
+        if ! docker ps --filter "name=prefect-test" --format "{{.Names}}" | grep -q prefect-test; then
+          echo "VALIDATION FAILED: Container is not running!"
+          docker logs prefect-test
+          docker rm -f prefect-test 2>/dev/null || true
+          exit 1
+        fi
+        
+        echo "=== Analyzing logs for errors ==="
+        docker logs prefect-test > /tmp/prefect-logs.txt 2>&1
+        if grep -iE "error|exception|failed|fatal|traceback|modulenotfounderror|importerror|cannot find|does not exist|no such file" /tmp/prefect-logs.txt; then
+          echo "VALIDATION FAILED: Errors detected in container logs!"
+          cat /tmp/prefect-logs.txt
+          docker stop prefect-test
+          docker rm prefect-test
+          exit 1
+        fi
+        
+        echo "VALIDATION PASSED: Container is healthy!"
+        cat /tmp/prefect-logs.txt
+        docker stop prefect-test
+        docker rm prefect-test
 
-  # Priority 3: Prefect Deployment Service
+    - name: Push Prefect Service to Docker Hub
+      if: github.event_name == 'push' && steps.validate.outcome == 'success'
+      run: |
+        echo "=== Pushing validated image to Docker Hub ==="
+        docker push ${{ steps.meta-prefect.outputs.tags }}
+
+    - name: Final cleanup
+      if: always()
+      run: |
+        docker rm -f prefect-test 2>/dev/null || true
+        docker system prune -a -f
+
+  # 3: Prefect Deployment Service 
   build-prefect-deployment:
-    runs-on: ubuntu-latest
-    needs: build-prefect  # Run after prefect build completes
+    runs-on: ubuntu-lates
+    needs: build-prefect
+    outputs:
+      validation-status: ${{ steps.validate.outcome }}
+      image-tag: ${{ steps.meta-prefect-deployment.outputs.tags }}
     steps:
+    - name: Check Previous Services Status
+      run: |
+        echo "Prolog status: ${{ needs.build-prolog.result }}"
+        echo "Prefect status: ${{ needs.build-prefect.result }}"
+     
     - name: Checkout repository
       uses: actions/checkout@v4
      
@@ -176,40 +256,75 @@ jobs:
         images: ${{ env.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect-deployment
         tags: |
           type=ref,event=branch
-          type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
 
-    - name: Free Disk Space (Before Prefect Deployment Build)
+    - name: Free Disk Space
       run: |
-        echo "Freeing disk space before Prefect Deployment build..."
         sudo docker system prune -a -f
-        sudo docker builder prune -a -f
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
         df -h
 
-    - name: Build and Push Prefect Deployment Service
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile.prefect
-        # Only push on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
-        tags: ${{ steps.meta-prefect-deployment.outputs.tags }}
-        labels: ${{ steps.meta-prefect-deployment.outputs.labels }}
-        cache-from: type=gha,scope=prefect-deployment-service
-        cache-to: type=gha,mode=max,scope=prefect-deployment-service
+    - name: Build and Validate Prefect Deployment Service
+      id: validate
+      run: |
+        echo "=== Building Prefect Deployment Service ==="
+        docker build -t ${{ steps.meta-prefect-deployment.outputs.tags }} -f Dockerfile.prefect .
+        
+        echo "=== Starting container for validation ==="
+        docker run -d --name prefect-deployment-test --env-file .env ${{ steps.meta-prefect-deployment.outputs.tags }}
+        
+        echo "=== Waiting for container initialization (30s) ==="
+        sleep 30
+        
+        echo "=== Checking container status ==="
+        if ! docker ps --filter "name=prefect-deployment-test" --format "{{.Names}}" | grep -q prefect-deployment-test; then
+          echo "VALIDATION FAILED: Container is not running!"
+          docker logs prefect-deployment-test
+          docker rm -f prefect-deployment-test 2>/dev/null || true
+          exit 1
+        fi
+        
+        echo "=== Analyzing logs for errors ==="
+        docker logs prefect-deployment-test > /tmp/prefect-deployment-logs.txt 2>&1
+        if grep -iE "error|exception|failed|fatal|traceback|modulenotfounderror|importerror|cannot find|does not exist|no such file" /tmp/prefect-deployment-logs.txt; then
+          echo "VALIDATION FAILED: Errors detected in container logs!"
+          cat /tmp/prefect-deployment-logs.txt
+          docker stop prefect-deployment-test
+          docker rm prefect-deployment-test
+          exit 1
+        fi
+        
+        echo "VALIDATION PASSED: Container is healthy!"
+        cat /tmp/prefect-deployment-logs.txt
+        docker stop prefect-deployment-test
+        docker rm prefect-deployment-test
 
-  #  4: Flask App 
+    - name: Push Prefect Deployment Service to Docker Hub
+      if: github.event_name == 'push' && steps.validate.outcome == 'success'
+      run: |
+        echo "=== Pushing validated image to Docker Hub ==="
+        docker push ${{ steps.meta-prefect-deployment.outputs.tags }}
+
+    - name: Final cleanup
+      if: always()
+      run: |
+        docker rm -f prefect-deployment-test 2>/dev/null || true
+        docker system prune -a -f
+
+  # 4: Flask App  
   build-flask:
-    runs-on: ubuntu-latest
-    needs: build-prefect  # Run after prefect build completes
+    runs-on: ubuntu-lates
+    needs: build-prefect-deployment
+    outputs:
+      validation-status: ${{ steps.validate.outcome }}
+      image-tag: ${{ steps.meta-flask.outputs.tags }}
     steps:
+    - name: Check All Previous Services Status
+      run: |
+        echo "Prolog status: ${{ needs.build-prolog.result }}"
+        echo "Prefect status: ${{ needs.build-prefect.result }}"
+        echo "Prefect Deployment status: ${{ needs.build-prefect-deployment.result }}"
+     
     - name: Checkout repository
       uses: actions/checkout@v4
      
@@ -241,31 +356,85 @@ jobs:
         images: ${{ env.DOCKER_HUB_USERNAME }}/hypothesis-generation-flask
         tags: |
           type=ref,event=branch
-          type=sha
-          # Dynamic tag based on branch name for push events
-          type=raw,value={{branch}},enable={{is_default_branch}}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/staging' }}
-          type=raw,value={{branch}},enable=${{ github.ref == 'refs/heads/develop' }}
+          type=raw,value=staging,enable=${{ github.ref == 'refs/heads/staging' }}
 
-    - name: Free Disk Space (Before Flask Build)
+    - name: Free Disk Space
       run: |
-        echo "Freeing disk space before Flask build..."
         sudo docker system prune -a -f
-        sudo docker builder prune -a -f
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
         df -h
 
-    - name: Build and Push Flask App
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: Dockerfile
-        # Only push on merge to staging/develop, not on PR
-        push: ${{ github.event_name == 'push' }}
-        tags: ${{ steps.meta-flask.outputs.tags }}
-        labels: ${{ steps.meta-flask.outputs.labels }}
-        cache-from: type=gha,scope=flask-app
-        cache-to: type=gha,mode=max,scope=flask-app
+    - name: Build and Validate Flask App
+      id: validate
+      run: |
+        echo "=== Building Flask App ==="
+        docker build -t ${{ steps.meta-flask.outputs.tags }} -f Dockerfile .
+        
+        echo "=== Starting container for validation ==="
+        docker run -d --name flask-test --env-file .env ${{ steps.meta-flask.outputs.tags }}
+        
+        echo "=== Waiting for container initialization (30s) ==="
+        sleep 30
+        
+        echo "=== Checking container status ==="
+        if ! docker ps --filter "name=flask-test" --format "{{.Names}}" | grep -q flask-test; then
+          echo "VALIDATION FAILED: Container is not running!"
+          docker logs flask-test
+          docker rm -f flask-test 2>/dev/null || true
+          exit 1
+        fi
+        
+        echo "=== Analyzing logs for errors ==="
+        docker logs flask-test > /tmp/flask-logs.txt 2>&1
+        if grep -iE "error|exception|failed|fatal|traceback|modulenotfounderror|importerror|cannot find|does not exist|no such file" /tmp/flask-logs.txt; then
+          echo "VALIDATION FAILED: Errors detected in container logs!"
+          cat /tmp/flask-logs.txt
+          docker stop flask-test
+          docker rm flask-test
+          exit 1
+        fi
+        
+        echo "VALIDATION PASSED: Container is healthy!"
+        cat /tmp/flask-logs.txt
+        docker stop flask-test
+        docker rm flask-test
+
+    - name: Push Flask App to Docker Hub
+      if: github.event_name == 'push' && steps.validate.outcome == 'success'
+      run: |
+        echo "=== Pushing validated image to Docker Hub ==="
+        docker push ${{ steps.meta-flask.outputs.tags }}
+
+    - name: Final cleanup
+      if: always()
+      run: |
+        docker rm -f flask-test 2>/dev/null || true
+        docker system prune -a -f
+
+  # Final validation check  
+  validation-summary:
+    runs-on: ubuntu-latest
+    needs: [build-prolog, build-prefect, build-prefect-deployment, build-flask]
+    if: always()
+    steps:
+    - name: Check all validations
+      run: |
+        echo "=== Validation Summary ==="
+        echo "Prolog: ${{ needs.build-prolog.outputs.validation-status }}"
+        echo "Prefect: ${{ needs.build-prefect.outputs.validation-status }}"
+        echo "Prefect Deployment: ${{ needs.build-prefect-deployment.outputs.validation-status }}"
+        echo "Flask: ${{ needs.build-flask.outputs.validation-status }}"
+        
+        FAILED_SERVICES=0
+        if [[ "${{ needs.build-prolog.outputs.validation-status }}" == "failure" ]]; then ((FAILED_SERVICES++)); fi
+        if [[ "${{ needs.build-prefect.outputs.validation-status }}" == "failure" ]]; then ((FAILED_SERVICES++)); fi
+        if [[ "${{ needs.build-prefect-deployment.outputs.validation-status }}" == "failure" ]]; then ((FAILED_SERVICES++)); fi
+        if [[ "${{ needs.build-flask.outputs.validation-status }}" == "failure" ]]; then ((FAILED_SERVICES++)); fi
+        
+        if [[ $FAILED_SERVICES -gt 0 ]]; then
+          echo " $FAILED_SERVICES service(s) failed validation!"
+          echo "But the pipeline continued to build all services."
+          exit 1  # Fail the final summary if any service failed
+        else
+          echo " All services passed validation!"
+        fi
