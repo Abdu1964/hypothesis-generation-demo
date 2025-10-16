@@ -1,37 +1,47 @@
-name: CD - pull Docker image & build with ansible
+name: CD - pull Docker image & build with ansible (staging only)
 
 on:
-  push:
-    branches:
-      - main
-      - develop
-      - staging
-  pull_request:
-    branches:
-      - main
-      - develop
-      - staging
+  repository_dispatch:
+    types: [deploy-staging]
 
 jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - name: Checkout current repository
-        uses: actions/checkout@v4
-        
-      - name: Debug environment
+      - name: Debug workflow info
         run: |
+          echo "Event Type: ${{ github.event.action }}"
+          echo "Image Tag: ${{ github.event.client_payload.image_tag }}"
+          echo "Triggered by: ${{ github.actor }}"
           echo "Current user: $(whoami)"
           echo "Home directory: $HOME"
           echo "Working directory: $(pwd)"
           echo "User ID: $(id -u)"
           echo "Group ID: $(id -g)"
+
+      - name: Checkout current repository
+        uses: actions/checkout@v4
           
       - name: Checkout Ansible repository
         uses: actions/checkout@v4
         with:
           repository: Abdu1964/ansible-deploy_v2.0
           path: ansible-deploy_v2.0
+
+      - name: Create .env file for Hypothesis_generation
+        run: |
+          mkdir -p $HOME/services/Hypothesis_generation
+          cat > $HOME/services/Hypothesis_generation/.env << EOF
+              # 
+              ANTHROPIC_API_KEY=${{secrets.ANTHROPIC_API_KEY}}
+              DB_NAME=${{secrets.DB_NAME}}
+              HF_TOKEN=${{secrets.HF_TOKEN}}
+              JWT_SECRET=${{secrets.JWT_SECRET}}
+              JWT_SECRET_KEY=${{secrets.JWT_SECRET_KEY}}
+              MONGODB_URI=${{secrets.MONGODB_URI}}
+              OPENAI_API_KEY=${{secrets.OPENAI_API_KEY}}
+
+          echo "Created .env file in Hypothesis_generation directory"
           
       - name: Create dynamic inventory
         run: |
