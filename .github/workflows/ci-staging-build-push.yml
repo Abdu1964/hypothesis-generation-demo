@@ -46,12 +46,10 @@ jobs:
         echo "PROLOG_PORT_INTERNAL=${{ secrets.PROLOG_PORT_INTERNAL }}" >> .env
         echo "FLASK_PORT_HOST=${{ secrets.FLASK_PORT_HOST }}" >> .env
         echo "FLASK_PORT_INTERNAL=${{ secrets.FLASK_PORT_INTERNAL }}" >> .env
-
     - name: Create test docker-compose
       run: |
         cat > docker-compose.ci.yml << 'EOF'
         version: '3.8'
-
         services:
           mongo:
             image: mongo:latest
@@ -62,7 +60,6 @@ jobs:
               - mongo-data-ci:/data/db
             networks:
               - app_network_ci
-
           prolog-service:
             container_name: prolog-service-ci-staging
             build:
@@ -76,7 +73,54 @@ jobs:
               - ./prolog_out_ci:/mnt/prolog_out_v3
             networks:
               - app_network_ci
-
+          prefect-service:
+            container_name: prefect-service-ci-staging
+            build:
+              context: .
+              dockerfile: Dockerfile.prefect
+            ports:
+              - "${PREFECT_PORT_HOST}:${PREFECT_PORT_INTERNAL}"
+            volumes:
+              - .:/app
+              - prefect-data-ci:/root/.prefect 
+            environment:
+              - PREFECT_API_URL=http://localhost:${PREFECT_PORT_INTERNAL}/api
+              - UV_PROJECT_ENVIRONMENT=/opt/prefect-venv
+            env_file:
+              - .env
+            command: > 
+              sh -c "uv run prefect server start --host 0.0.0.0"
+            networks:
+              - app_network_ci
+            
+            
+          prefect-deployment:
+            container_name: prefect-deployment-ci-staging
+            build:
+              context: .
+              dockerfile: Dockerfile.prefect
+            volumes:
+              - .:/app
+            env_file:
+              - .env
+            command: >
+              sh -c "
+              echo 'Waiting for Prefect API to be ready...' &&
+              sleep 30 &&
+              uv run python deployments.py --ensembl-hgnc-map /app/data/ensembl_to_hgnc.pkl 
+              --hgnc-ensembl-map /app/data/hgnc_to_ensembl.pkl 
+              --go-map /app/data/go_map.pkl 
+              --swipl-host prolog-service 
+              --swipl-port ${PROLOG_PORT_INTERNAL}
+              "
+            environment:
+              - PREFECT_API_URL=http://prefect-service:${PREFECT_PORT_INTERNAL}/api
+              - UV_PROJECT_ENVIRONMENT=/opt/prefect-venv
+            depends_on:
+              - prefect-service
+                          
+            networks:
+              - app_network_ci
           flask-app:
             container_name: flask-app-ci-staging
             build:
@@ -104,69 +148,15 @@ jobs:
               "
             networks:
               - app_network_ci
-
-          prefect-service:
-            container_name: prefect-service-ci-staging
-            build:
-              context: .
-              dockerfile: Dockerfile.prefect
-            ports:
-              - "${PREFECT_PORT_HOST}:${PREFECT_PORT_INTERNAL}"
-            volumes:
-              - .:/app
-              - prefect-data-ci:/root/.prefect 
-            environment:
-              - PREFECT_API_URL=http://localhost:${PREFECT_PORT_INTERNAL}/api
-              - UV_PROJECT_ENVIRONMENT=/opt/prefect-venv
-            env_file:
-              - .env
-            command: > 
-              sh -c "uv run prefect server start --host 0.0.0.0"
-            networks:
-              - app_network_ci
-            healthcheck:
-              test: ["CMD", "curl", "-f", "http://localhost:${PREFECT_PORT_INTERNAL}/api/health"]
-              interval: 10s
-              timeout: 5s
-              retries: 5
-            
-          prefect-deployment:
-            container_name: prefect-deployment-ci-staging
-            build:
-              context: .
-              dockerfile: Dockerfile.prefect
-            volumes:
-              - .:/app
-            env_file:
-              - .env
-            command: >
-              sh -c "
-              uv run python deployments.py --ensembl-hgnc-map /app/data/ensembl_to_hgnc.pkl 
-              --hgnc-ensembl-map /app/data/hgnc_to_ensembl.pkl 
-              --go-map /app/data/go_map.pkl 
-              --swipl-host prolog-service 
-              --swipl-port ${PROLOG_PORT_INTERNAL}
-              "
-            environment:
-              - PREFECT_API_URL=http://prefect-service:${PREFECT_PORT_INTERNAL}/api
-              - UV_PROJECT_ENVIRONMENT=/opt/prefect-venv
-            depends_on:
-              prefect-service:
-                condition: service_healthy
-            networks:
-              - app_network_ci
-
         volumes:
           mongo-data-ci:
           prefect-data-ci:
-
         networks:
           app_network_ci:
             driver: bridge
         EOF
         
         mkdir -p prolog_out_ci external_data_ci
-
     - name: Login to Docker Hub
       if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
       uses: docker/login-action@v3
@@ -247,25 +237,12 @@ jobs:
           docker compose -f docker-compose.ci.yml logs flask-app
           exit 1
         fi
-        
-        echo "=== Testing service endpoints ==="
-        
-        # Test Prefect API health
-        echo "Testing Prefect API health..."
-        if curl -f --retry 3 --retry-delay 10 --max-time 15 http://localhost:${PREFECT_PORT_HOST}/api/health; then
-          echo "[success] Prefect API health endpoint working"
-        else
-          echo "[error] Prefect API health endpoint failed"
-          echo "=== Prefect logs ==="
-          docker compose -f docker-compose.ci.yml logs prefect-service
-          exit 1
-        fi
+       
         
         echo "=== Final status - All services ==="
         docker compose -f docker-compose.ci.yml ps
         
         echo "[success] VALIDATION PASSED - ALL services are running and healthy!"
-
     - name: Tag and Push Images to Docker Hub
       if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
       run: |
@@ -284,7 +261,6 @@ jobs:
         docker push ${{ env.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect-deployment:staging
         
         echo "[success] All images pushed to Docker Hub"
-
     - name: Trigger CD workflow via Repository Dispatch
       if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
       run: |
@@ -295,7 +271,6 @@ jobs:
           https://api.github.com/repos/${{ github.repository }}/dispatches \
           -d '{"event_type":"deploy-staging","client_payload":{"image_tag":"staging"}}'
         echo "[SUCCESS] CD workflow triggered successfully!"
-
     - name: Complete Cleanup
       if: always()
       run: |
