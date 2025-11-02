@@ -30,8 +30,8 @@ jobs:
 
       - name: Create .env file for Hypothesis_generation
         run: |
-          mkdir -p $HOME/services/Hypothesis_generation
-          cat > $HOME/services/Hypothesis_generation/.env << EOF
+          mkdir -p $HOME/services/hypothesis-generation-demo
+          cat > $HOME/services/hypothesis-generation-demo/.env << EOF
 
               # === API Keys and Tokens ===
               ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
@@ -128,7 +128,7 @@ jobs:
           ansible-playbook -i inventory/hosts.ini playbooks/deploy_server.yml \
             --tags "Hypothesis_Remote" \
             --tags "local_network" \
-            -e "install_dir=$HOME/services/Hypothesis" \
+            -e "install_dir=$HOME/services/hypothesis-generation-demo" \
             -e "ansible_user_id=$(whoami)" \
             -e "ansible_user_dir=$HOME" \
             -v
