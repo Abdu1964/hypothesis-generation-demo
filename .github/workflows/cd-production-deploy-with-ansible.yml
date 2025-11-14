@@ -1,8 +1,8 @@
-name: CD - pull Docker image & build with ansible (staging only)
+name: CD - pull Docker image & build with ansible (production only)
 
 on:
   repository_dispatch:
-    types: [deploy-staging]
+    types: [deploy-production]
 
 jobs:
   deploy:
@@ -45,26 +45,26 @@ jobs:
               # === Database Configuration ===
               DB_NAME=${{ secrets.DB_NAME }}
               MONGODB_URI=${{ secrets.MONGODB_URI }}
-              MONGO_PORT_HOST=${{ secrets.MONGO_PORT_HOST }}
+              MONGO_PORT_HOST=${{ secrets.MONGO_PORT_HOST_PRODUCTION }}
               MONGO_PORT_INTERNAL=${{ secrets.MONGO_PORT_INTERNAL }}
 
               # === Prefect Workflow Configuration ===
-              PREFECT_PORT_HOST=${{ secrets.PREFECT_PORT_HOST }}
+              PREFECT_PORT_HOST=${{ secrets.PREFECT_PORT_HOST_PRODUCTION }}
               PREFECT_PORT_INTERNAL=${{ secrets.PREFECT_PORT_INTERNAL }}
 
               # === Prolog Microservice Configuration ===
-              PROLOG_PORT_HOST=${{ secrets.PROLOG_PORT_HOST }}
+              PROLOG_PORT_HOST=${{ secrets.PROLOG_PORT_HOST_PRODUCTION }}
               PROLOG_PORT_INTERNAL=${{ secrets.PROLOG_PORT_INTERNAL }}
 
               # === Flask Backend Configuration ===
-              FLASK_PORT_HOST=${{ secrets.FLASK_PORT_HOST }}
+              FLASK_PORT_HOST=${{ secrets.FLASK_PORT_HOST_PRODUCTION }}
               FLASK_PORT_INTERNAL=${{ secrets.FLASK_PORT_INTERNAL }}
 
               # === docker-image===
-              prolog_staging=${{secrets.prolog_staging}}
-              flask_staging=${{secrets.flask_staging}}
-              prefect_staging=${{secrets.prefect_staging}}
-              prefect_deployment_staging=${{secrets.prefect_deployment_staging}}    
+              prolog_production=${{secrets.prolog_production}}
+              flask_production=${{secrets.flask_production}}
+              prefect_production=${{secrets.prefect_production}}
+              prefect_deployment_production=${{secrets.prefect_deployment_production}}    
 
           
       - name: Create dynamic inventory
