@@ -427,7 +427,7 @@ jobs:
               uv run prefect concurrency-limit create harmonize_tag 2 || true &&
 
               echo '--- 2. Registering Flows ---' &&
-              uv run python deployments.py --ensembl-hgnc-map /app/data/ensembl_to_hgnc.pkl --hgnc-ensembl-map /app/data/hgnc_to_ensembl.pkl --go-map /app/data/go_map.pkl --swipl-host prolog-service --swipl-port 4242 &&
+              uv run python src/deployments.py --ensembl-hgnc-map /app/data/ensembl_to_hgnc.pkl --hgnc-ensembl-map /app/data/hgnc_to_ensembl.pkl --go-map /app/data/go_map.pkl --swipl-host prolog-service --swipl-port 4242 &&
 
               echo '--- 3. Starting The Workers ---' &&
               uv run prefect worker start --pool 'analysis-pool' --name 'heavy-worker' &
@@ -492,7 +492,7 @@ jobs:
               redis:
                 condition: service_healthy
             command: >
-              uv run gunicorn "server:create_app_with_config"
+              uv run gunicorn "src.server:create_app_with_config"
               --workers 4
               --worker-class uvicorn.workers.UvicornWorker
               --bind 0.0.0.0:5000
