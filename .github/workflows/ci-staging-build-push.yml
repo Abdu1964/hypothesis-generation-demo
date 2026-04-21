@@ -97,8 +97,12 @@ jobs:
         echo "=== Cleaning workspace before checkout ==="
         # Fix permissions from previous run
         docker run --rm -v "$GITHUB_WORKSPACE:/workspace" alpine:latest sh -c "chmod -R 777 /workspace" 2>/dev/null || true
-        # Remove old CI resources
+        # Remove old CI resources via compose file if it exists
         docker compose -f docker-compose.ci.yml down -v 2>/dev/null || true
+        # Explicitly remove known CI containers by name (handles case where compose file doesn't exist yet)
+        for container in mongo-ci-staging prolog-service-ci-staging prefect-postgres-ci-staging dask-scheduler-ci-staging dask-worker-ci-staging redis-ci-staging prefect-service-ci-staging prefect-deployment-ci-staging api-service-ci-staging; do
+          docker rm -f $container 2>/dev/null || true
+        done
         echo "[success] Pre-cleanup completed"
 
     - name: Checkout repository
