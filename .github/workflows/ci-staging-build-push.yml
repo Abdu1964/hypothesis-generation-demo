@@ -97,8 +97,12 @@ jobs:
         echo "=== Cleaning workspace before checkout ==="
         # Fix permissions from previous run
         docker run --rm -v "$GITHUB_WORKSPACE:/workspace" alpine:latest sh -c "chmod -R 777 /workspace" 2>/dev/null || true
-        # Remove old CI resources
-        docker compose -f docker-compose.ci.yml down -v 2>/dev/null || true
+        # Remove old CI resources via compose file if it exists
+        docker compose -f docker-compose.ci.yml down -v --remove-orphans 2>/dev/null || true
+        # Explicitly remove known CI containers by name (handles case where compose file doesn't exist yet)
+        for container in mongo-ci-staging prolog-service-ci-staging prefect-postgres-ci-staging dask-scheduler-ci-staging dask-worker-ci-staging redis-ci-staging prefect-service-ci-staging prefect-deployment-ci-staging api-service-ci-staging; do
+          docker rm -f $container 2>/dev/null || true
+        done
         echo "[success] Pre-cleanup completed"
 
     - name: Checkout repository
@@ -671,6 +675,49 @@ jobs:
         done
 
         echo "[SUCCESS] All images pushed to Docker Hub"
+    
+    - name: Cleanup old Docker Hub tags (keep last 2 SHA tags per service)
+      if: github.event_name == 'push' && steps.check-merge.outputs.is_merge == 'true' && steps.validate.outcome == 'success'
+      run: |
+        echo "=== Cleaning up old Docker Hub tags ==="
+        SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        
+        for service in prolog-service prefect-service api-service prefect-deployment dask-scheduler dask-worker; do
+          SERVICE_NAME="hypothesis-generation-${service}"
+          REPO="${{ secrets.DOCKER_HUB_USERNAME }}/${SERVICE_NAME}"
+          
+          echo "Cleaning tags for: $REPO"
+          
+          # Get all tags
+          TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.DOCKER_HUB_TOKEN }}" \
+            "https://hub.docker.com/v2/repositories/${REPO}/tags?page_size=100" \
+            | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        tags = data.get('results', [])
+        # Filter only SHA tags (staging-xxxxxxx pattern)
+        sha_tags = [t for t in tags if t['name'].startswith('staging-') and len(t['name']) == 15]
+        # Sort by last_updated oldest first
+        sha_tags.sort(key=lambda x: x['last_updated'])
+        # Print all except last 2
+        to_delete = sha_tags[:-2]
+        for t in to_delete:
+            print(t['name'])
+        ")
+          
+          # Delete old tags
+          for TAG in $TAGS; do
+            echo "Deleting old tag: $TAG"
+            curl -s -X DELETE \
+              -H "Authorization: Bearer ${{ secrets.DOCKER_HUB_TOKEN }}" \
+              "https://hub.docker.com/v2/repositories/${REPO}/tags/${TAG}/"
+            echo "Deleted: $TAG"
+          done
+          
+          echo "Done cleaning: $REPO"
+        done
+        
+        echo "[SUCCESS] Docker Hub cleanup completed - kept last 2 SHA tags per service"
 
     - name: Set deployment trigger
       if: github.event_name == 'push' && steps.check-merge.outputs.is_merge == 'true' && steps.validate.outcome == 'success'
@@ -687,7 +734,7 @@ jobs:
         docker compose -f docker-compose.ci.yml ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
 
         # Stop and remove containers
-        docker compose -f docker-compose.ci.yml down -v 2>/dev/null || true
+        docker compose -f docker-compose.ci.yml down -v --remove-orphans 2>/dev/null || true
 
         # Fix permissions on files created by Docker containers
         docker run --rm -v "$GITHUB_WORKSPACE:/workspace" alpine:latest sh -c "chmod -R 777 /workspace" || true
@@ -709,12 +756,15 @@ jobs:
     - name: Trigger CD workflow via Repository Dispatch
       if: github.event_name == 'push' && steps.check-merge.outputs.is_merge == 'true' && steps.validate.outcome == 'success'
       run: |
+        SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        IMAGE_TAG="staging-${SHORT_SHA}"
+
         curl -L -X POST \
           -H "Accept: application/vnd.github+json" \
           -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
           https://api.github.com/repos/${{ github.repository }}/dispatches \
-          -d '{"event_type":"deploy-staging","client_payload":{"image_tag":"staging"}}'
+          -d "{\"event_type\":\"deploy-staging\",\"client_payload\":{\"image_tag\":\"${IMAGE_TAG}\"}}"
         echo "[SUCCESS] CD workflow triggered successfully!"
 
   # Email Notifications
