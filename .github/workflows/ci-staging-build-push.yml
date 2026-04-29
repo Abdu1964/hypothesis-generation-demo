@@ -247,6 +247,7 @@ jobs:
         services:
           mongo:
             image: mongo:latest
+            restart: unless-stopped
             container_name: mongo-ci-staging
             ports:
               - "27098:27017"
@@ -264,6 +265,7 @@ jobs:
               retries: 5
 
           prolog-service:
+            restart: unless-stopped
             container_name: prolog-service-ci-staging
             build:
               context: .
@@ -278,6 +280,7 @@ jobs:
               - app_network_ci
 
           prefect-postgres:
+            restart: unless-stopped
             container_name: prefect-postgres-ci-staging
             image: postgres:15-alpine
             environment:
@@ -297,6 +300,7 @@ jobs:
               retries: 5
 
           dask-scheduler:
+            restart: unless-stopped
             container_name: dask-scheduler-ci-staging
             build:
               context: .
@@ -323,6 +327,7 @@ jobs:
               - app_network_ci
 
           dask-worker:
+            restart: unless-stopped
             container_name: dask-worker-ci-staging
             build:
               context: .
@@ -340,6 +345,7 @@ jobs:
               - API_HOST=api-service
               - API_PORT=5000
               - OPENAI_API_KEY=dummy-key-for-ci
+              - REDIS_URL=redis://redis:6379
             env_file:
               - .env
             volumes:
@@ -354,6 +360,8 @@ jobs:
                 condition: service_healthy
               prolog-service:
                 condition: service_started
+              redis:
+                condition: service_healthy
             command: >
               uv run dask worker tcp://dask-scheduler:8786
               --nworkers 2
@@ -371,6 +379,7 @@ jobs:
               - app_network_ci
 
           redis:
+            restart: unless-stopped
             container_name: redis-ci-staging
             image: redis:7-alpine
             ports:
@@ -384,6 +393,7 @@ jobs:
               retries: 5
 
           prefect-service:
+            restart: unless-stopped
             container_name: prefect-service-ci-staging
             build:
               context: .
@@ -461,6 +471,7 @@ jobs:
               - API_HOST=api-service
               - API_PORT=5000
               - OPENAI_API_KEY=dummy-key-for-ci
+              - REDIS_URL=redis://redis:6379
             depends_on:
               prefect-service:
                 condition: service_healthy
@@ -468,10 +479,13 @@ jobs:
                 condition: service_started
               mongo:
                 condition: service_healthy
+              redis:
+                condition: service_healthy
             networks:
               - app_network_ci
 
           api-service:
+            restart: unless-stopped
             container_name: api-service-ci-staging
             build:
               context: .
