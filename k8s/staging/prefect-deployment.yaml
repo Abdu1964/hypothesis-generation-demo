@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prefect-deployment
+  namespace: hypothesis-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prefect-deployment
+  template:
+    metadata:
+      labels:
+        app: prefect-deployment
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-creds
+      initContainers:
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command: ["sh", "-c", "until redis-cli -h redis ping; do echo waiting for redis; sleep 2; done"]
+      containers:
+        - name: prefect-deployment
+          image: abdum1964/hypothesis-generation-prefect-deployment:staging
+          imagePullPolicy: Always
+          env:
+            - name: PREFECT_API_URL
+              value: "http://prefect-service:4200/api"
+            - name: UV_PROJECT_ENVIRONMENT
+              value: "/opt/flask-venv"
+            - name: DASK_ADDRESS
+              value: "tcp://dask-scheduler:8786"
+            - name: PYTHONPATH
+              value: "/app"
+            - name: ENSEMBL_HGNC_MAP
+              value: "/app/data/ensembl_to_hgnc.pkl"
+            - name: HGNC_ENSEMBL_MAP
+              value: "/app/data/hgnc_to_ensembl.pkl"
+            - name: GO_MAP
+              value: "/app/data/go_map.pkl"
+            - name: API_HOST
+              value: "api-service"
+            - name: API_PORT
+              value: "5000"
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+          envFrom:
+            - secretRef:
+                name: hypothesis-secrets
+          command:
+            - "bash"
+            - "-c"
+            - |
+              uv run prefect work-pool create 'analysis-pool' --type process --overwrite &&
+              uv run prefect work-pool update 'analysis-pool' --concurrency-limit 3 &&
+              uv run prefect work-pool create 'interactive-pool' --type process --overwrite &&
+              uv run prefect work-pool update 'interactive-pool' --concurrency-limit 10 &&
+              uv run prefect concurrency-limit create harmonize_tag 2 || true &&
+              uv run python src/deployments.py --ensembl-hgnc-map /app/data/ensembl_to_hgnc.pkl --hgnc-ensembl-map /app/data/hgnc_to_ensembl.pkl --go-map /app/data/go_map.pkl --swipl-host prolog-service --swipl-port 4242 &&
+              uv run prefect worker start --pool 'analysis-pool' --name 'heavy-worker' &
+              uv run prefect worker start --pool 'interactive-pool' --name 'light-worker' &
+              tail -f /dev/null
+          resources:
+            limits:
+              memory: "8Gi"
+          volumeMounts:
+            - name: app-source
+              mountPath: /app
+            - name: app-data
+              mountPath: /app/data
+      volumes:
+        - name: app-source
+          hostPath:
+            path: /mnt/hdd_1/tesnim/hypothesis-generation_demo
+        - name: app-data
+          hostPath:
+            path: /mnt/hdd_1/tesnim/hypothesis-generation_demo/data

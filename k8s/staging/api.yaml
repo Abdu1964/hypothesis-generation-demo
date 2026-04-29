@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hypothesis-api
+  namespace: hypothesis-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hypothesis-api
+  template:
+    metadata:
+      labels:
+        app: hypothesis-api
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-creds
+      containers:
+        - name: api
+          image: abdum1964/hypothesis-generation-api-service:staging
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: FLASK_ENV
+              value: "development"
+            - name: PREFECT_API_URL
+              value: "http://prefect-service:4200/api"
+            - name: PYTHONPATH
+              value: "/app"
+            - name: DASK_ADDRESS
+              value: "tcp://dask-scheduler:8786"
+            - name: SWIPL_HOST
+              value: "prolog-service"
+            - name: SWIPL_PORT
+              value: "4242"
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+            - name: ENSEMBL_HGNC_MAP
+              value: "/app/data/ensembl_to_hgnc.pkl"
+            - name: HGNC_ENSEMBL_MAP
+              value: "/app/data/hgnc_to_ensembl.pkl"
+            - name: GO_MAP
+              value: "/app/data/go_map.pkl"
+          envFrom:
+            - secretRef:
+                name: hypothesis-secrets
+          command:
+            - "uv"
+            - "run"
+            - "gunicorn"
+            - "src.server:create_app_with_config"
+            - "--workers"
+            - "4"
+            - "--worker-class"
+            - "uvicorn.workers.UvicornWorker"
+            - "--bind"
+            - "0.0.0.0:5000"
+            - "--timeout"
+            - "600"
+            - "--graceful-timeout"
+            - "30"
+            - "--keep-alive"
+            - "5"
+            - "--access-logfile"
+            - "-"
+            - "--error-logfile"
+            - "-"
+          volumeMounts:
+            - name: app-source
+              mountPath: /app
+            - name: app-data
+              mountPath: /app/data
+      volumes:
+        - name: app-source
+          hostPath:
+            path: /mnt/hdd_1/tesnim/hypothesis-generation_demo
+        - name: app-data
+          hostPath:
+            path: /mnt/hdd_1/tesnim/hypothesis-generation_demo/data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hypothesis-api
+  namespace: hypothesis-staging
+spec:
+  type: NodePort
+  selector:
+    app: hypothesis-api
+  ports:
+    - port: 5000
+      targetPort: 5000
+      nodePort: 30500
