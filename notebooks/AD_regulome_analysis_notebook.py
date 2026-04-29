@@ -97,26 +97,14 @@ def __(mo):
 
 
 @app.cell
-def __(Path, subprocess, os, json):
+def __(Path, subprocess, os):
+    import json as _json
+
     TOOLS_DIR = Path("tools")
     LDSC_DIR  = TOOLS_DIR / "ldsc"
     TOOLS_DIR.mkdir(exist_ok=True)
 
-    _env_check = subprocess.run(["conda", "env", "list"], capture_output=True, text=True)
-    if "ldsc27" not in _env_check.stdout:
-        subprocess.run(["conda", "create", "-n", "ldsc27", "python=2.7", "-y"], check=True)
-
-    _conda_json = subprocess.run(
-        ["conda", "env", "list", "--json"], capture_output=True, text=True, check=True
-    )
-    _envs = json.loads(_conda_json.stdout)["envs"]
-    ldsc27_path = [e for e in _envs if "ldsc27" in e][0]
-
-    if not os.path.exists(os.path.join(ldsc27_path, "bin", "bedtools")):
-        subprocess.run(
-            ["conda", "install", "-n", "ldsc27", "-c", "bioconda", "bedtools", "-y"],
-            check=True,
-        )
+    subprocess.run(["uv", "add", "statsmodels", "pyyaml"], check=False)
 
     if not LDSC_DIR.exists():
         subprocess.run(
@@ -124,27 +112,13 @@ def __(Path, subprocess, os, json):
             check=True,
         )
 
-    _check_np = subprocess.run(
-        [os.path.join(ldsc27_path, "bin", "python"), "-c", "import numpy"],
-        capture_output=True,
-    )
-    if _check_np.returncode != 0:
-        subprocess.run(
-            ["conda", "install", "-n", "ldsc27", "-y", "openssl=1.0.2", "-c", "conda-forge"],
-            check=True,
-        )
-        subprocess.run(
-            ["conda", "install", "-n", "ldsc27", "-y",
-             "numpy", "scipy", "pandas", "bitarray", "-c", "conda-forge"],
-            check=True,
-        )
-        subprocess.run(
-            ["conda", "install", "-n", "ldsc27", "-y",
-             "pybedtools", "pysam=0.15.3", "-c", "bioconda", "-c", "conda-forge"],
-            check=True,
-        )
-
     subprocess.run(["chmod", "+x", str(LDSC_DIR / "ldsc.py")], check=True)
+
+    _conda_json = subprocess.run(
+        ["conda", "env", "list", "--json"], capture_output=True, text=True, check=True
+    )
+    _envs = _json.loads(_conda_json.stdout)["envs"]
+    ldsc27_path = [e for e in _envs if "ldsc27" in e][0]
     python27_path = os.path.join(ldsc27_path, "bin", "python")
 
     print(f"LDSC environment ready")
