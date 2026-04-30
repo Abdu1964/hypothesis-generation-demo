@@ -10,6 +10,7 @@ on:
 env:
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
   DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+  DOCKER_HUB_ORG: rejuvebio
 
 jobs:
   # SonarQube Code Quality Analysis
@@ -683,9 +684,9 @@ jobs:
         for service in prolog-service prefect-service api-service prefect-deployment dask-scheduler dask-worker; do
           IMAGE_ID=$(docker compose -f docker-compose.ci.yml images -q $service)
           SERVICE_NAME="hypothesis-generation-${service}"
-          STAGING_TAG="${{ secrets.DOCKER_HUB_USERNAME }}/${SERVICE_NAME}:staging"
-          SHA_TAG="${{ secrets.DOCKER_HUB_USERNAME }}/${SERVICE_NAME}:staging-${SHORT_SHA}"
-          LATEST_TAG="${{ secrets.DOCKER_HUB_USERNAME }}/${SERVICE_NAME}:staging-latest"
+          STAGING_TAG="${{ env.DOCKER_HUB_ORG }}/${SERVICE_NAME}:staging"
+          SHA_TAG="${{ env.DOCKER_HUB_ORG }}/${SERVICE_NAME}:staging-${SHORT_SHA}"
+          LATEST_TAG="${{ env.DOCKER_HUB_ORG }}/${SERVICE_NAME}:staging-latest"
 
           docker tag $IMAGE_ID $STAGING_TAG
           docker tag $IMAGE_ID $SHA_TAG
@@ -708,7 +709,7 @@ jobs:
         
         for service in prolog-service prefect-service api-service prefect-deployment dask-scheduler dask-worker; do
           SERVICE_NAME="hypothesis-generation-${service}"
-          REPO="${{ secrets.DOCKER_HUB_USERNAME }}/${SERVICE_NAME}"
+          REPO="${{ env.DOCKER_HUB_ORG }}/${SERVICE_NAME}"
           
           echo "Cleaning tags for: $REPO"
           
@@ -818,12 +819,12 @@ jobs:
           Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           Images pushed:
-          - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-prolog-service:staging
-          - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-dask-scheduler:staging
-          - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-dask-worker:staging
-          - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-api-service:staging
-          - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect-service:staging
-          - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect-deployment:staging
+          - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-prolog-service:staging
+          - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-dask-scheduler:staging
+          - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-dask-worker:staging
+          - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-api-service:staging
+          - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-prefect-service:staging
+          - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-prefect-deployment:staging
 
   notify-failure:
     runs-on: self-hosted
@@ -877,12 +878,12 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" ]]; then
             echo "[SUCCESS] All services built, validated, and pushed to Docker Hub!"
             echo "*** Images:"
-            echo "  - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-prolog-service:staging"
-            echo "  - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-dask-scheduler:staging"
-            echo "  - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-dask-worker:staging"
-            echo "  - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-api-service:staging"
-            echo "  - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect-service:staging"
-            echo "  - ${{ secrets.DOCKER_HUB_USERNAME }}/hypothesis-generation-prefect-deployment:staging"
+            echo "  - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-prolog-service:staging"
+            echo "  - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-dask-scheduler:staging"
+            echo "  - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-dask-worker:staging"
+            echo "  - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-api-service:staging"
+            echo "  - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-prefect-service:staging"
+            echo "  - ${{ env.DOCKER_HUB_ORG }}/hypothesis-generation-prefect-deployment:staging"
           else
             echo "[SUCCESS] PR validation passed - ready to merge!"
           fi
