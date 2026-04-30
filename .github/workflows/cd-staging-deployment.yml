@@ -1,4 +1,4 @@
-name: CD - pull Docker image & build with ansible (staging only)
+name: CD - Deploy to Kubernetes (staging)
 
 on:
   repository_dispatch:
@@ -13,122 +13,102 @@ jobs:
           echo "Event Type: ${{ github.event.action }}"
           echo "Image Tag: ${{ github.event.client_payload.image_tag }}"
           echo "Triggered by: ${{ github.actor }}"
-          echo "Current user: $(whoami)"
-          echo "Home directory: $HOME"
-          echo "Working directory: $(pwd)"
-          echo "User ID: $(id -u)"
-          echo "Group ID: $(id -g)"
 
       - name: Checkout current repository
         uses: actions/checkout@v4
-          
-      - name: Checkout Ansible repository
-        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_STAGING }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV
+
+      - name: Deploy to Kubernetes
+        run: |
+          set -euo pipefail
+
+          NAMESPACE="hypothesis-staging"
+          TAG="${{ github.event.client_payload.image_tag }}"
+
+          if [ -z "$TAG" ]; then
+            TAG="staging"
+          fi
+
+          echo "Using image tag: $TAG"
+
+          kubectl set image deployment/hypothesis-api \
+            api=abdum1964/hypothesis-generation-api-service:${TAG} \
+            -n "$NAMESPACE"
+
+          kubectl set image deployment/prolog-service \
+            prolog=abdum1964/hypothesis-generation-prolog-service:${TAG} \
+            -n "$NAMESPACE"
+
+          kubectl set image deployment/prefect-service \
+            prefect-service=abdum1964/hypothesis-generation-prefect-service:${TAG} \
+            -n "$NAMESPACE"
+
+          kubectl set image deployment/prefect-deployment \
+            prefect-deployment=abdum1964/hypothesis-generation-prefect-deployment:${TAG} \
+            -n "$NAMESPACE"
+
+          kubectl set image deployment/dask-scheduler \
+            dask-scheduler=abdum1964/hypothesis-generation-dask-scheduler:${TAG} \
+            -n "$NAMESPACE"
+
+          kubectl set image deployment/dask-worker \
+            dask-worker=abdum1964/hypothesis-generation-dask-worker:${TAG} \
+            -n "$NAMESPACE"
+
+      - name: Wait for rollout
+        run: |
+          set -euo pipefail
+          kubectl rollout status deployment/hypothesis-api -n hypothesis-staging --timeout=180s
+          kubectl rollout status deployment/prolog-service -n hypothesis-staging --timeout=180s
+          kubectl rollout status deployment/prefect-service -n hypothesis-staging --timeout=180s
+          kubectl rollout status deployment/prefect-deployment -n hypothesis-staging --timeout=180s
+          kubectl rollout status deployment/dask-scheduler -n hypothesis-staging --timeout=180s
+          kubectl rollout status deployment/dask-worker -n hypothesis-staging --timeout=180s
+
+      - name: Verify all pods
+        run: |
+          kubectl get pods -n hypothesis-staging
+
+      - name: Send success email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
         with:
-          repository: rejuve-bio/ansible-deploy
-          path: ansible-deploy
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "CD Pipeline SUCCESS - Hypothesis Generation Deployed to K8s"
+          to: ${{ secrets.RECIEVER_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          body: |
+            Deployment to Kubernetes completed successfully!
 
-      - name: Create .env file for Hypothesis_generation
-        run: |
-          mkdir -p $HOME/services/hypothesis-generation-demo
-          cat > $HOME/services/hypothesis-generation-demo/.env << EOF
+            Repository: ${{ github.repository }}
+            Triggered by: ${{ github.actor }}
 
-              # === API Keys and Tokens ===
-              ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-              OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-              HF_TOKEN=${{ secrets.HF_TOKEN }}
+            All pods updated and running in staging namespace.
 
-              # === Authentication and Security ===
-              JWT_SECRET=${{ secrets.JWT_SECRET }}
-              JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+      - name: Send failure email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "CD Pipeline FAILED - Hypothesis Generation K8s Deploy"
+          to: ${{ secrets.RECIEVER_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          body: |
+            Kubernetes deployment failed!
 
-              # === Database Configuration ===
-              DB_NAME=${{ secrets.DB_NAME }}
-              MONGODB_URI=${{ secrets.MONGODB_URI }}
-              MONGO_PORT_HOST=${{ secrets.MONGO_PORT_HOST }}
-              MONGO_PORT_INTERNAL=${{ secrets.MONGO_PORT_INTERNAL }}
+            Repository: ${{ github.repository }}
+            Triggered by: ${{ github.actor }}
 
-              # === Prefect Workflow Configuration ===
-              PREFECT_PORT_HOST=${{ secrets.PREFECT_PORT_HOST }}
-              PREFECT_PORT_INTERNAL=${{ secrets.PREFECT_PORT_INTERNAL }}
-
-              # === Prolog Microservice Configuration ===
-              PROLOG_PORT_HOST=${{ secrets.PROLOG_PORT_HOST }}
-              PROLOG_PORT_INTERNAL=${{ secrets.PROLOG_PORT_INTERNAL }}
-
-              # === Flask Backend Configuration ===
-              FLASK_PORT_HOST=${{ secrets.FLASK_PORT_HOST }}
-              FLASK_PORT_INTERNAL=${{ secrets.FLASK_PORT_INTERNAL }}
-
-              # === docker-image===
-              prolog_staging=${{secrets.prolog_staging}}
-              flask_staging=${{secrets.flask_staging}}
-              prefect_staging=${{secrets.prefect_staging}}
-              prefect_deployment_staging=${{secrets.prefect_deployment_staging}}    
-
-          
-      - name: Create dynamic inventory
-        run: |
-          cd ansible-deploy
-          mkdir -p inventory
-          # Get the actual username running the workflow
-          CURRENT_USER=$(whoami)
-          USER_HOME=$HOME
-          cat > inventory/hosts.ini <<EOL
-          [Hypothesis_Remote]
-          localhost ansible_connection=local ansible_user=$CURRENT_USER ansible_become=false ansible_user_dir=$USER_HOME
-          EOL
-          echo "Inventory created for user: $CURRENT_USER"
-          cat inventory/hosts.ini
-          
-      - name: Create dynamic playbook
-        run: |
-          cd ansible-deploy
-          mkdir -p playbooks
-          # Create the deploy_server.yml playbook dynamically
-          cat > playbooks/deploy_server.yml <<EOL
-          ---
-          # deploy_Hypothesis
-          - name: Deploy Hypothesis Service
-            hosts: Hypothesis_Remote
-            tags: Hypothesis_Remote
-            become: no
-            tasks:
-              - include_role:
-                  name: Hypothesis
-                  tasks_from: staging-production-deploy.yml
-          EOL
-          echo "Playbook created:"
-          cat playbooks/deploy_server.yml
-          
-      - name: Ansible configuration
-        run: |
-          cd ansible-deploy
-          # Ensure ansible uses the correct Python interpreter
-          cat > ansible.cfg <<EOL
-          [defaults]
-          interpreter_python = /usr/bin/python3
-          host_key_checking = False
-          inventory = inventory/hosts.ini
-          become = false
-          remote_user = $(whoami)
-          [privilege_escalation]
-          become = false
-          become_method = sudo
-          become_user = root
-          become_ask_pass = false
-          EOL
-          
-      - name: Deploy with Ansible
-        run: |
-          cd ansible-deploy
-          echo "Running as user: $(whoami)"
-          echo "Home directory: $HOME"
-          # Force the correct installation directory
-          ansible-playbook -i inventory/hosts.ini playbooks/deploy_server.yml \
-            --tags "Hypothesis_Remote" \
-            --tags "local_network" \
-            -e "install_dir=$HOME/services/hypothesis-generation-demo" \
-            -e "ansible_user_id=$(whoami)" \
-            -e "ansible_user_dir=$HOME" \
-            -v
+            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dask-scheduler
+  namespace: hypothesis-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dask-scheduler
+  template:
+    metadata:
+      labels:
+        app: dask-scheduler
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-creds
+      containers:
+        - name: dask-scheduler
+          image: abdum1964/hypothesis-generation-dask-scheduler:staging-latest
+          ports:
+            - containerPort: 8786
+            - containerPort: 8787
+          env:
+            - name: PYTHONPATH
+              value: "/app"
+            - name: SKIP_SEED
+              value: "true"
+          command:
+            - "sh"
+            - "-c"
+            - "uv run dask scheduler --host 0.0.0.0 --port 8786 --dashboard-address :8787"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dask-scheduler
+  namespace: hypothesis-staging
+spec:
+  selector:
+    app: dask-scheduler
+  ports:
+    - name: scheduler
+      port: 8786
+      targetPort: 8786
+    - name: dashboard
+      port: 8787
+      targetPort: 8787

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prefect-postgres
+  namespace: hypothesis-staging
+spec:
+  selector:
+    matchLabels:
+      app: prefect-postgres
+  serviceName: prefect-postgres
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: prefect-postgres
+    spec:
+      containers:
+        - name: prefect-postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: hypothesis-secrets
+                  key: PREFECT_DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hypothesis-secrets
+                  key: PREFECT_DB_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: hypothesis-secrets
+                  key: PREFECT_DB_NAME
+          volumeMounts:
+            - name: prefect-postgres-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: prefect-postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prefect-postgres
+  namespace: hypothesis-staging
+spec:
+  selector:
+    app: prefect-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
