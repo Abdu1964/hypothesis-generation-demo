@@ -17,7 +17,7 @@ spec:
         - name: dockerhub-creds
       containers:
         - name: prefect-service
-          image: abdum1964/hypothesis-generation-prefect-service:staging
+          image: rejuvebio/hypothesis-generation-prefect-service:staging
           imagePullPolicy: Always
           ports:
             - containerPort: 4200
