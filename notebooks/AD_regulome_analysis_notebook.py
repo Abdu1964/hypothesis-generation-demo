@@ -37,15 +37,16 @@ def __(mo):
 
 
 @app.cell
-def __(mo, os):
-    GWAS_INPUT_FILE = mo.ui.text(
-        value="data/gwas/PASS_AtrialFibrillation_Nielsen2018.sumstats.gz",
+def __(mo):
+    S3_BASE          = "s3://rejuve-bio/hypothesis-generation-demo"
+    GWAS_INPUT_FILE  = mo.ui.text(
+        value=f"{S3_BASE}/data/gwas/PASS_AtrialFibrillation_Nielsen2018.sumstats.gz",
         label="GWAS input file path",
         full_width=True,
     )
-    W_HM3_SNPLIST   = "/mnt/hdd_1/rediet/hypothesis-generation-demo/ldsc/data/w_hm3.snplist"
-    HM3_NO_MHC_LIST = "data/reference/hm3_no_MHC.list.txt"
-    CATLAS_DIR       = "humanenhancer_atac_data"
+    W_HM3_SNPLIST   = f"{S3_BASE}/ldsc/data/w_hm3.snplist"
+    HM3_NO_MHC_LIST = f"{S3_BASE}/data/reference/hm3_no_MHC.list.txt"
+    CATLAS_DIR       = f"{S3_BASE}/humanenhancer_atac_data"
     CATLAS_URL       = "http://catlas.org/humanenhancer/data/cCREs/"
 
     mo.vstack([
@@ -54,11 +55,12 @@ def __(mo, os):
         mo.md(f"w_hm3.snplist: `{W_HM3_SNPLIST}`"),
     ])
     return (
+        S3_BASE,
         GWAS_INPUT_FILE,
         W_HM3_SNPLIST,
         HM3_NO_MHC_LIST,
         CATLAS_DIR,
-        CATLAS_URL
+        CATLAS_URL,
     )
 
 
@@ -89,6 +91,7 @@ def __(GWAS_INPUT_FILE, os, re):
         RESULTS_PREFIX,
     )
 
+
 @app.cell
 def __(mo):
     mo.md("## 0. Setup: download and configure LDSC")
@@ -96,19 +99,54 @@ def __(mo):
 
 
 @app.cell
-def __(Path, subprocess, os):
-    import json as _json
-
+def __(Path, subprocess, os, json):
     TOOLS_DIR = Path("tools")
     LDSC_DIR  = TOOLS_DIR / "ldsc"
+    TOOLS_DIR.mkdir(exist_ok=True)
 
-    subprocess.run(["chmod", "+x", str(LDSC_DIR / "ldsc.py")], check=True)
+    _env_check = subprocess.run(["conda", "env", "list"], capture_output=True, text=True)
+    if "ldsc27" not in _env_check.stdout:
+        subprocess.run(["conda", "create", "-n", "ldsc27", "python=2.7", "-y"], check=True)
 
     _conda_json = subprocess.run(
         ["conda", "env", "list", "--json"], capture_output=True, text=True, check=True
     )
-    _envs = _json.loads(_conda_json.stdout)["envs"]
+    _envs = json.loads(_conda_json.stdout)["envs"]
     ldsc27_path = [e for e in _envs if "ldsc27" in e][0]
+
+    if not os.path.exists(os.path.join(ldsc27_path, "bin", "bedtools")):
+        subprocess.run(
+            ["conda", "install", "-n", "ldsc27", "-c", "bioconda", "bedtools", "-y"],
+            check=True,
+        )
+
+    if not LDSC_DIR.exists():
+        subprocess.run(
+            ["git", "clone", "https://github.com/bulik/ldsc.git", str(LDSC_DIR)],
+            check=True,
+        )
+
+    _check_np = subprocess.run(
+        [os.path.join(ldsc27_path, "bin", "python"), "-c", "import numpy"],
+        capture_output=True,
+    )
+    if _check_np.returncode != 0:
+        subprocess.run(
+            ["conda", "install", "-n", "ldsc27", "-y", "openssl=1.0.2", "-c", "conda-forge"],
+            check=True,
+        )
+        subprocess.run(
+            ["conda", "install", "-n", "ldsc27", "-y",
+             "numpy", "scipy", "pandas", "bitarray", "-c", "conda-forge"],
+            check=True,
+        )
+        subprocess.run(
+            ["conda", "install", "-n", "ldsc27", "-y",
+             "pybedtools", "pysam=0.15.3", "-c", "bioconda", "-c", "conda-forge"],
+            check=True,
+        )
+
+    subprocess.run(["chmod", "+x", str(LDSC_DIR / "ldsc.py")], check=True)
     python27_path = os.path.join(ldsc27_path, "bin", "python")
 
     print(f"LDSC environment ready")
@@ -126,7 +164,7 @@ def __(mo):
 @app.cell
 def __(
     os, urllib, pd, subprocess, re,
-    CATLAS_DIR, CATLAS_URL,
+    S3_BASE, CATLAS_DIR, CATLAS_URL,
     GWAS_FILE,
 ):
     for _d in ["data/peaks", "data/reference", "data/gwas", "data/beds"]:
@@ -159,11 +197,10 @@ def __(
         return None
 
     def _peak_to_bed(ct):
-        peak_txt = f"data/peaks/{ct}.peak.annotation.txt"
+        peak_txt = f"{S3_BASE}/data/peaks/{ct}.peak.annotation.txt"
         bed_out  = f"data/beds/{ct}.bed"
         if os.path.exists(bed_out):
             return bed_out
-
         _peaks = pd.read_csv(peak_txt, sep="\t")
         _peaks[["seqnames", "start", "end"]].rename(
             columns={"seqnames": "chr"}
@@ -217,7 +254,7 @@ def __(mo):
 
 
 @app.cell
-def __(subprocess, os):
+def __(subprocess, os, S3_BASE):
     if not os.path.exists("data/reference/GRCh38"):
         subprocess.run(
             ["tar", "-xzf", "data/reference/GRCh38.tgz", "-C", "data/reference"],
@@ -226,12 +263,12 @@ def __(subprocess, os):
 
     for _tgz, _base, _check in [
         (
-            "data/reference/GRCh38/plink_files.tgz",
+            f"{S3_BASE}/data/reference/GRCh38/plink_files.tgz",
             "data/reference/GRCh38",
             "plink_files/1000G.EUR.hg38.1.bim",
         ),
         (
-            "data/reference/GRCh38/weights.tgz",
+            f"{S3_BASE}/data/reference/GRCh38/weights.tgz",
             "data/reference/GRCh38",
             "weights",
         ),
@@ -571,7 +608,7 @@ def __(mo):
 
 
 @app.cell
-def __(subprocess, os, all_cell_types, cell_type_beds, python27_path, ldsc27_path):
+def __(subprocess, os, all_cell_types, cell_type_beds, python27_path, ldsc27_path, S3_BASE):
     os.makedirs("data/annotations", exist_ok=True)
     _env = os.environ.copy()
     _env["PATH"] = f"{ldsc27_path}/bin:" + _env.get("PATH", "")
@@ -595,7 +632,7 @@ def __(subprocess, os, all_cell_types, cell_type_beds, python27_path, ldsc27_pat
                 [
                     python27_path, "tools/ldsc/make_annot.py",
                     "--bed-file",   _bed,
-                    "--bimfile",    f"data/reference/GRCh38/plink_files/1000G.EUR.hg38.{_ch}.bim",
+                    "--bimfile",    f"{S3_BASE}/data/reference/GRCh38/plink_files/1000G.EUR.hg38.{_ch}.bim",
                     "--annot-file", _out,
                 ],
                 capture_output=True, text=True, env=_env,
@@ -617,7 +654,7 @@ def __(mo):
 
 
 @app.cell
-def __(subprocess, os, all_cell_types, python27_path, concurrent, multiprocessing, HM3_NO_MHC_LIST):
+def __(subprocess, os, all_cell_types, python27_path, concurrent, multiprocessing, HM3_NO_MHC_LIST, S3_BASE):
     os.makedirs("data/ldscores", exist_ok=True)
 
     def _calc_ld(args):
@@ -632,7 +669,7 @@ def __(subprocess, os, all_cell_types, python27_path, concurrent, multiprocessin
                 [
                     python27_path, "tools/ldsc/ldsc.py",
                     "--l2",
-                    "--bfile",      f"data/reference/GRCh38/plink_files/1000G.EUR.hg38.{ch}",
+                    "--bfile",      f"{S3_BASE}/data/reference/GRCh38/plink_files/1000G.EUR.hg38.{ch}",
                     "--ld-wind-cm", "1.0",
                     "--annot",      f"data/annotations/{ct}.{ch}.annot.gz",
                     "--thin-annot",
@@ -697,7 +734,7 @@ def __(mo):
 
 
 @app.cell
-def __(CTS_FILE, python27_path, SUMSTATS_FILE, RESULTS_PREFIX, os, subprocess):
+def __(CTS_FILE, python27_path, SUMSTATS_FILE, RESULTS_PREFIX, os, subprocess, S3_BASE):
     if not os.path.exists(SUMSTATS_FILE):
         print(f"Skipping — sumstats not found: {SUMSTATS_FILE}")
     elif not os.path.exists(CTS_FILE):
@@ -710,11 +747,11 @@ def __(CTS_FILE, python27_path, SUMSTATS_FILE, RESULTS_PREFIX, os, subprocess):
                 python27_path, "tools/ldsc/ldsc.py",
                 "--h2-cts",         SUMSTATS_FILE,
                 "--ref-ld-chr",     (
-                    "data/OSF/baseline_v1.2/baseline.,"
+                    f"{S3_BASE}/data/OSF/baseline_v1.2/baseline.,"
                     "data/ldscores/all_merged_cCREs/all_merged_cCREs."
                 ),
                 "--ref-ld-chr-cts", CTS_FILE,
-                "--w-ld-chr",       "data/OSF/weights/weights.hm3_noMHC.",
+                "--w-ld-chr",       f"{S3_BASE}/data/OSF/weights/weights.hm3_noMHC.",
                 "--out",            RESULTS_PREFIX,
             ],
             check=False,
