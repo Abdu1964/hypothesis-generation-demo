@@ -89,7 +89,6 @@ def __(GWAS_INPUT_FILE, os, re):
         RESULTS_PREFIX,
     )
 
-
 @app.cell
 def __(mo):
     mo.md("## 0. Setup: download and configure LDSC")
@@ -102,15 +101,6 @@ def __(Path, subprocess, os):
 
     TOOLS_DIR = Path("tools")
     LDSC_DIR  = TOOLS_DIR / "ldsc"
-    TOOLS_DIR.mkdir(exist_ok=True)
-
-    subprocess.run(["uv", "add", "statsmodels", "pyyaml"], check=False)
-
-    if not LDSC_DIR.exists():
-        subprocess.run(
-            ["git", "clone", "https://github.com/bulik/ldsc.git", str(LDSC_DIR)],
-            check=True,
-        )
 
     subprocess.run(["chmod", "+x", str(LDSC_DIR / "ldsc.py")], check=True)
 
@@ -129,7 +119,7 @@ def __(Path, subprocess, os):
 
 @app.cell
 def __(mo):
-    mo.md("## 1. Download cell-type peak annotations and reference files")
+    mo.md("## 1. Discover cell types and resolve BED sources")
     return
 
 
@@ -357,12 +347,7 @@ def __(mo):
 
 @app.cell
 def __(os, Path):
-    HARMONIZER_CODE_REPO = "/mnt/hdd_1/
-    
-    
-    
-    
-    /gwas-sumstats-harmoniser"
+    HARMONIZER_CODE_REPO = "/mnt/hdd_1/abdu/gwas-sumstats-harmoniser"
     HARMONIZER_REF_DIR   = "/mnt/hdd_1/abdu/gwas-sumstats-harmoniser/data/gwas_harm_ref"
     harmonizer_script    = Path(HARMONIZER_CODE_REPO) / "harmonizer.sh"
 
@@ -668,7 +653,7 @@ def __(subprocess, os, all_cell_types, python27_path, concurrent, multiprocessin
         for _res in _ex.map(_calc_ld, _tasks):
             print(_res)
 
-    print("\nAll LD scores calculated using HapMap3 SNPs")
+    print("\nAll LD scores calculated")
     return
 
 
