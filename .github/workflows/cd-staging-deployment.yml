@@ -223,3 +223,72 @@ jobs:
             Triggered by: ${{ github.actor }}
 
             Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  deploy-compute:
+    needs: deploy-staging
+    environment: compute
+    runs-on: [self-hosted, compute-runner]
+    steps:
+      - name: Debug workflow info
+        run: |
+          echo "Event Type: ${{ github.event.action }}"
+          echo "Image Tag: ${{ github.event.client_payload.image_tag }}"
+          echo "Triggered by: ${{ github.actor }}"
+
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+
+      - name: Sync code to deployment directory
+        run: |
+          set -euo pipefail
+          mkdir -p /mnt/hdd_1/services/hypothesis-generation-demo
+          rsync -a --delete --exclude '.git' ./ /mnt/hdd_1/services/hypothesis-generation-demo/
+
+      - name: Deploy with Docker Compose
+        working-directory: /mnt/hdd_1/services/hypothesis-generation-demo/docker
+        run: |
+          set -euo pipefail
+          docker compose up --build -d
+
+      - name: Verify containers
+        working-directory: /mnt/hdd_1/services/hypothesis-generation-demo/docker
+        run: |
+          docker compose ps
+
+      - name: Send success email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "CD Pipeline SUCCESS - Hypothesis Generation Deployed to Compute"
+          to: ${{ secrets.RECIEVER_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          body: |
+            Deployment to the compute server completed successfully!
+
+            Repository: ${{ github.repository }}
+            Triggered by: ${{ github.actor }}
+
+      - name: Send failure email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "CD Pipeline FAILED - Hypothesis Generation Compute Deploy"
+          to: ${{ secrets.RECIEVER_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          body: |
+            Compute deployment failed!
+
+            Repository: ${{ github.repository }}
+            Triggered by: ${{ github.actor }}
+
+            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
