@@ -1,0 +1,51 @@
+# One-shot: makes sure credible-sets-postgres holds the pinned OT_RELEASE
+# (MinIO pg_dump snapshot, else EBI FTP). Exits 0 in seconds when already loaded.
+# k8s counterpart of the ot-db-bootstrap compose service (PR #99); replaces the
+# old credible-sets-loader and opentargets-studies-loader Jobs.
+# Requires OT_RELEASE in hypothesis-env-secrets (see README.md).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ot-db-bootstrap
+  namespace: hypothesis-staging
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: dockerhub-creds
+      containers:
+        - name: ot-db-bootstrap
+          # same image as dask-worker; ships pg_dump/pg_restore 15 after PR #99
+          image: rejuvebio/hypothesis-generation-dask-worker:staging
+          imagePullPolicy: Always
+          env:
+            - name: PYTHONPATH
+              value: "/app"
+            - name: CREDIBLE_SETS_DB_HOST
+              value: "credible-sets-postgres"
+            - name: CREDIBLE_SETS_DB_PORT
+              value: "5432"
+          envFrom:
+            - secretRef:
+                name: hypothesis-secrets
+            - secretRef:
+                name: hypothesis-env-secrets
+          command:
+            - "uv"
+            - "run"
+            - "python"
+            - "scripts/bootstrap_ot_db.py"
+          volumeMounts:
+            - name: app-source
+              mountPath: /app
+            - name: app-data
+              mountPath: /app/data
+      volumes:
+        - name: app-source
+          hostPath:
+            path: /mnt/hdd_1/tesnim/hypothesis-generation_demo
+        - name: app-data
+          hostPath:
+            path: /mnt/hdd_1/tesnim/hypothesis-generation_demo/data
