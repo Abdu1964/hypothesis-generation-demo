@@ -68,13 +68,13 @@ WORKDIR /app/pl
 # Copy Prolog files from the local directory
 COPY ./pl /app/pl
 
-# Install Prolog libraries using pack_install
+# Install Prolog packs straight from git (server(false): no dependency on swi-prolog.org/pack/query).
+# Order matters: dependencies first (cplint needs bddem, auc, matrix; prolog_graphviz needs prolog_library_collection).
 RUN apt-get update && apt-get install -y git graphviz && \
-    swipl -g "pack_install('prolog_library_collection', [interactive(false)])" -t halt && \
-    swipl -g "pack_install('prolog_graphviz', [interactive(false)])" -t halt && \
-    # swipl -g "pack_install('interpolate', [interactive(false)])" -t halt && \
-    swipl -g "pack_install(cplint, [interactive(false)])" -t halt && \
-    swipl -g "pack_install(plstat, [interactive(false)])" -t halt
+    for r in wouterbeek/prolog_library_collection wouterbeek/prolog_graphviz \
+             friguzzi/bddem friguzzi/auc friguzzi/matrix friguzzi/cplint damianoazzolini/plstat; do \
+      swipl -g "pack_install('https://github.com/$r.git', [interactive(false), server(false)])" -t halt || exit 1; \
+    done
 
 # Expose port 4242 for the Prolog server
 EXPOSE 4242
